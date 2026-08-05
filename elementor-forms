@@ -45,17 +45,31 @@
     phone number into sha256_email_address and match nothing, forever,
     with no error anywhere.
 
-  NOT VERIFIED AGAINST A LIVE INSTALL
+    The label is the last tier and it is not optional. Elementor
+    generates `field_0275ba1` for every field nobody renames, and nobody
+    renames them, so on a real form the ID is silent and the label is the
+    only human-meaningful thing left.
 
-    The capture model and the markup below were built from Elementor Pro
-    markup rendered by real sites and from the `submit_success` contract
-    as a dozen independent plugins use it — not from a submission
-    captured on an install of our own.
+  WHAT IS VERIFIED AND WHAT IS NOT
 
-    That is better than documentation alone and still weaker than the
-    html-forms, ninja-forms and contact-form-7 scripts, which were built
-    against payloads captured from real submissions. Run the diagnostic
-    in the README against the real form before trusting it.
+    Verified against a live Elementor Pro 3.5.2 install: the rendered
+    field markup, and the event contract read out of that install's own
+    `form.<hash>.bundle.min.js` —
+
+      e.success ? ( t.trigger("submit_success", e.data),
+                    t.trigger("form_destruct", e.data),
+                    t.trigger("reset"), ... )
+
+    where `t` is the form. So submit_success is a jQuery event on the
+    form, and the reset that empties the fields is two statements later
+    in the same synchronous run. `form_destruct` is what performs the
+    redirect. That is the whole reason the hashing starts at submit: by
+    the time success fires there is no room left to await anything.
+
+    NOT verified: a real submission. Reading a client's form is free;
+    submitting it creates a real enquiry, so no payload has been captured
+    end to end. Run the diagnostic in the README on a real submission
+    before treating this as proven.
 */
 
 (function () {
@@ -593,7 +607,53 @@
     return m ? m[1] : '';
   }
 
-  function canonicalElementorKey(el) {
+  /*
+    The last tier, and the one Elementor makes necessary. Elementor
+    generates a field ID like `field_0275ba1` for every field nobody
+    renames, and nobody renames them — on a real form the ID says nothing
+    at all, so without this the street and the postcode are simply lost.
+
+    Matched by the same exact-match discipline as everything else: the
+    WHOLE normalised label against the allowlist, never a substring. A
+    substring test would read "Email us your question" as an email field,
+    and a label is the freest text in the markup.
+
+    city and region stay out of reach here, because they live in
+    EXPLICIT_ONLY rather than SYNONYMS and matchKey never consults it. A
+    field labelled "City" is still not collected without data-upd. That
+    is the point of the split.
+  */
+  function labelKey(el, form) {
+    var texts = [];
+    try {
+      var id = el.getAttribute && el.getAttribute('id');
+      if (id && form && form.querySelectorAll) {
+        // Walked rather than selected: an id set by hand can contain
+        // characters that need escaping, and CSS.escape is not something
+        // to depend on inside a GTM tag.
+        var labels = form.querySelectorAll('label[for]');
+        for (var i = 0; i < labels.length; i++) {
+          if (labels[i].getAttribute('for') === id) {
+            texts.push(labels[i].textContent);
+            break;
+          }
+        }
+      }
+      if (el.getAttribute) {
+        texts.push(el.getAttribute('placeholder'));
+        texts.push(el.getAttribute('aria-label'));
+      }
+    } catch (err) { log('could not read a label', err); }
+
+    for (var j = 0; j < texts.length; j++) {
+      if (!texts[j]) continue;
+      var hit = matchKey(normKey(texts[j]));
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function canonicalElementorKey(el, form) {
     var explicit = el.getAttribute && el.getAttribute('data-upd');
     if (explicit) {
       var e = normKey(explicit);
@@ -620,7 +680,9 @@
 
     var auto = String(el.getAttribute && el.getAttribute('autocomplete') || '')
       .toLowerCase().split(/\s+/).pop();
-    return AUTOCOMPLETE_MAP.hasOwnProperty(auto) ? AUTOCOMPLETE_MAP[auto] : null;
+    if (AUTOCOMPLETE_MAP.hasOwnProperty(auto)) return AUTOCOMPLETE_MAP[auto];
+
+    return labelKey(el, form);
   }
 
   function skipField(el) {
@@ -656,7 +718,7 @@
       }
       if (skipField(el)) continue;
 
-      var key = canonicalElementorKey(el);
+      var key = canonicalElementorKey(el, form);
       if (!key) continue;
 
       var value = el.value;

@@ -151,6 +151,88 @@ const POPUP_FORM = `
     </div>
   </div>`;
 
+/*
+  Verbatim from a live Elementor Pro 3.5.2 install (rollerdor.net/contact),
+  values added. Kept as scraped, including the tab-padded label text, the
+  duplicated nested field group inside the HTML field, and the checkbox
+  group whose label `for` does not match any of its inputs.
+
+  Three things here that invented markup would not have shown:
+    - there is NO hidden form_id / post_id / referer_title input, so the
+      form id has to come off the widget wrapper's data-id
+    - the phone field's ID is `field_0275ba1`, so only the type class
+      finds it
+    - street and postcode are on generated IDs too, so only the label
+      finds them — while "City" sits right between them and must NOT be
+      collected
+*/
+const ROLLERDOR_FORM = `
+<div class="elementor-element elementor-element-ced666d bm_action_form elementor-widget elementor-widget-form" data-id="ced666d" data-element_type="widget" data-widget_type="form.default">
+<div class="elementor-widget-container">
+<form class="elementor-form" method="post" name="Action Lead Form">
+<div class="elementor-form-fields-wrapper elementor-labels-">
+<div class="elementor-field-type-text elementor-field-group elementor-column elementor-field-group-name elementor-col-33 elementor-field-required">
+<label for="form-field-name" class="elementor-field-label elementor-screen-only">
+								Your Name							</label>
+<input size="1" type="text" name="form_fields[name]" id="form-field-name" class="elementor-field elementor-size-md  elementor-field-textual" placeholder="Your Name*" required="required" aria-required="true" value="Jane Ann Smith">
+</div>
+<div class="elementor-field-type-tel elementor-field-group elementor-column elementor-field-group-field_0275ba1 elementor-col-33">
+<label for="form-field-field_0275ba1" class="elementor-field-label elementor-screen-only">
+								Phone							</label>
+<input size="1" type="tel" name="form_fields[field_0275ba1]" id="form-field-field_0275ba1" class="elementor-field elementor-size-md  elementor-field-textual" placeholder="Phone" pattern="[0-9()#&amp;+*-=.]+" value="07700 900123">
+</div>
+<div class="elementor-field-type-email elementor-field-group elementor-column elementor-field-group-email elementor-col-33 elementor-field-required">
+<label for="form-field-email" class="elementor-field-label elementor-screen-only">
+								Email							</label>
+<input size="1" type="email" name="form_fields[email]" id="form-field-email" class="elementor-field elementor-size-md  elementor-field-textual" placeholder="Email*" required="required" aria-required="true" value="Jane.Doe+Forms@Gmail.com">
+</div>
+<div class="elementor-field-type-text elementor-field-group elementor-column elementor-field-group-field_dbf8253 elementor-col-33">
+<label for="form-field-field_dbf8253" class="elementor-field-label elementor-screen-only">
+								Street Address							</label>
+<input size="1" type="text" name="form_fields[field_dbf8253]" id="form-field-field_dbf8253" class="elementor-field elementor-size-md  elementor-field-textual" placeholder="Street Address" value="123 New Rd">
+</div>
+<div class="elementor-field-type-text elementor-field-group elementor-column elementor-field-group-field_ceded4f elementor-col-33">
+<label for="form-field-field_ceded4f" class="elementor-field-label elementor-screen-only">
+								City							</label>
+<input size="1" type="text" name="form_fields[field_ceded4f]" id="form-field-field_ceded4f" class="elementor-field elementor-size-md  elementor-field-textual" placeholder="City" value="Southampton">
+</div>
+<div class="elementor-field-type-text elementor-field-group elementor-column elementor-field-group-field_33bb4d3 elementor-col-33 elementor-field-required">
+<label for="form-field-field_33bb4d3" class="elementor-field-label elementor-screen-only">
+								Postcode							</label>
+<input size="1" type="text" name="form_fields[field_33bb4d3]" id="form-field-field_33bb4d3" class="elementor-field elementor-size-md  elementor-field-textual" placeholder="Postcode*" required="required" aria-required="true" value="SO99 9XX">
+</div>
+<div class="elementor-field-type-hidden elementor-field-group elementor-column elementor-field-group-field_2a63952 elementor-col-100">
+</div>
+<div class="elementor-field-type-textarea elementor-field-group elementor-column elementor-field-group-field_35b8921 elementor-col-66">
+<label for="form-field-field_35b8921" class="elementor-field-label elementor-screen-only">
+								Message							</label>
+<textarea class="elementor-field-textual elementor-field  elementor-size-md" name="form_fields[field_35b8921]" id="form-field-field_35b8921" rows="1" placeholder="Message">Please call about my sickness absence</textarea>
+</div>
+<div class="elementor-field-type-html elementor-field-group elementor-column elementor-field-group-field_bf74b9e elementor-col-100">
+<div class="elementor-field-type-html elementor-field-group elementor-column elementor-field-group-field_f2e6eb7 elementor-col-100">
+<h4>Choose your door</h4>
+</div>
+<div class="elementor-field-type-checkbox elementor-field-group elementor-column elementor-field-group-field_eeff51c elementor-col-100">
+<div class="elementor-field-subgroup elementor-subgroup-inline">
+<span class="elementor-field-option">
+<input type="checkbox" value="RD55 Fixed Size Roller Garage Doors" id="form-field-field_bf74b9e_0" name="form_fields[field_bf74b9e][]" checked>
+<label for="form-field-field_bf74b9e">RD55 Fixed Size Roller Garage Doors</label>
+</span>
+<span class="elementor-field-option">
+<input type="checkbox" value="Single Roller Garage Doors" id="form-field-field_bf74b9e_1" name="form_fields[field_bf74b9e][]">
+<label for="form-field-field_bf74b9e">Single Roller Garage Doors</label>
+</span>
+</div>
+</div>
+</div>
+<div class="elementor-field-group elementor-column elementor-field-type-submit elementor-col-33 e-form__buttons">
+<button type="submit" class="elementor-button elementor-size-sm"><span><span class="elementor-button-text">SUBMIT</span></span></button>
+</div>
+</div>
+</form>
+</div>
+</div>`;
+
 const NOT_ELEMENTOR = `
   <form id="newsletter" action="#">
     <input type="email" name="email" value="someone@example.com">
@@ -168,7 +250,8 @@ const PAGES = {
   '/popup': POPUP_FORM,
   '/not-elementor': NOT_ELEMENTOR,
   '/two-forms': STANDARD_FORM + MISLABELLED_FORM,
-  '/mixed': STANDARD_FORM + NOT_ELEMENTOR
+  '/mixed': STANDARD_FORM + NOT_ELEMENTOR,
+  '/rollerdor': ROLLERDOR_FORM
 };
 
 const PAGE = (body) => `<!doctype html><meta charset="utf-8"><title>el</title>${body}`;
@@ -454,6 +537,50 @@ console.log('\ntwo forms on one page');
     submissions[0]?.form_details?.form_id);
   check('the other form\'s values are nowhere in the payload',
     !JSON.stringify(submissions).includes(sha256('janedoe@gmail.com')));
+}
+
+/* ── A real install ──────────────────────────────────────────────────── */
+
+console.log('\nlive markup: Elementor Pro 3.5.2 (rollerdor.net/contact)');
+{
+  const { submissions, blob } = await run('/rollerdor');
+  const ud = submissions[0]?.user_data || {};
+  const addr = ud.address || {};
+
+  check('reports exactly one submission', submissions.length === 1,
+    `got ${submissions.length}`);
+  check('form id comes off the widget data-id — there is no form_id input',
+    submissions[0]?.form_details?.form_id === 'ced666d',
+    submissions[0]?.form_details?.form_id);
+  check('form name from the name attribute',
+    submissions[0]?.form_details?.form_name === 'Action Lead Form',
+    submissions[0]?.form_details?.form_name);
+
+  check('email', ud.sha256_email_address === sha256('janedoe@gmail.com'));
+  check('phone found by type class alone (ID is field_0275ba1)',
+    ud.sha256_phone_number === sha256('+447700900123'), ud.sha256_phone_number);
+  check('first name from form_fields[name]', addr.sha256_first_name === sha256('jane'));
+  check('last name from form_fields[name]', addr.sha256_last_name === sha256('smith'));
+  check('street found by label (ID is field_dbf8253)',
+    addr.sha256_street === sha256('123 new rd'), addr.sha256_street);
+  check('postcode found by label (ID is field_33bb4d3)',
+    addr.postal_code === 'so99 9xx', addr.postal_code);
+
+  check('"City" sits between them and is still NOT collected',
+    addr.city === undefined && !blob.toLowerCase().includes('southampton'),
+    addr.city);
+  check('the message textarea is dropped', !blob.toLowerCase().includes('sickness'));
+  check('a ticked product checkbox is dropped',
+    !blob.toLowerCase().includes('rd55'));
+  check('the nested HTML field group does not confuse the wrapper lookup',
+    !blob.toLowerCase().includes('choose your door'));
+
+  const keys = Object.keys(ud).concat(Object.keys(addr)).sort();
+  check('only expected keys are present, nothing extra',
+    keys.join(',') === [
+      'address', 'postal_code', 'sha256_email_address', 'sha256_first_name',
+      'sha256_last_name', 'sha256_phone_number', 'sha256_street'
+    ].sort().join(','), keys.join(','));
 }
 
 /* ── Consent ─────────────────────────────────────────────────────────── */

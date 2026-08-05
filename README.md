@@ -10,23 +10,35 @@ only ever read once your CMP has granted `ad_user_data`, re-checked on every sub
 **Install is one GTM Custom HTML tag.** Paste the file in, set one country code, trigger on All
 Pages.
 
-## Read this before you install it
+## What is verified, and what is not
 
-**This one has not been verified against a live Elementor install.** The html-forms, ninja-forms
-and contact-form-7 scripts were each built against payloads captured from real submissions on real
-sites. This was built from Elementor Pro markup rendered by real sites, and from the
-`submit_success` contract as a dozen independent plugins use it — better than working from the
-documentation alone, which is what the Gravity script had, and still not the same as a captured
-submission.
+**Verified against a live Elementor Pro 3.5.2 install.** The field markup in `test/` is the real
+rendered HTML from a working contact form, kept verbatim — tab-padded labels, generated field IDs,
+a nested field group inside an HTML field, and all. There is a test asserting exactly what that form
+yields.
 
-Run the diagnostic below against the real form first. The two things most worth confirming are that
-`submit_success` fires with the form as its target, and that the `elementor-field-type-*` wrapper
-classes are present on the fields you care about.
+**The event contract is verified too, from the install's own JavaScript** rather than from
+documentation. Inside Elementor Pro's `form.<hash>.bundle.min.js`:
+
+```js
+e.success ? ( t.trigger("submit_success", e.data),
+              t.trigger("form_destruct", e.data),
+              t.trigger("reset"), … )
+```
+
+`t` is the form. So `submit_success` is a jQuery event fired **on the form**, `form_destruct` is
+what performs the redirect, and `trigger("reset")` — which empties every field — is two statements
+later in the same synchronous run. That settles the two design questions this script turns on.
+
+**Not verified: an actual submission.** Reading a client's form is free; submitting it creates a
+real enquiry, so no payload has been captured end to end. Run the diagnostic below on a real
+submission before treating this as proven.
 
 ## How it captures
 
 Elementor posts the form over AJAX and, on success, fires the jQuery event `submit_success` — then
-resets the form. By the time anything downstream reacts, the values are on their way out.
+immediately resets the form. By the time anything downstream reacts, the values are on their way
+out.
 
 So this **reads the fields at submit**, while they are still there, **starts hashing immediately**,
 and **commits on `submit_success`** once the submission is known to have succeeded. Nothing is
@@ -34,9 +46,10 @@ pushed for a submission that fails validation.
 
 ### Why the hashing starts at submit
 
-SHA-256 through SubtleCrypto is asynchronous, and Elementor's **Redirect** action navigates away
-inside the same success handler that fires `submit_success`. A hash that starts when success fires
-is racing the unload.
+SHA-256 through SubtleCrypto is asynchronous, and Elementor's **Redirect** action runs on
+`form_destruct` — the statement immediately after `submit_success`, synchronously (`location.href =
+t.data.redirect_url`). A hash that starts when success fires is racing a navigation that is already
+queued.
 
 Starting it at submit buys a whole network round trip — typically a few hundred milliseconds — so
 by the time success fires the hashes are already sitting there and the push is synchronous. There
@@ -54,13 +67,13 @@ An allowlist. Only these fields ever leave the page; everything else is discarde
 |---|---|---|
 | Email | `elementor-field-type-email` | yes |
 | Phone | `elementor-field-type-tel` | yes |
-| First name | field ID, or a Name field split | yes |
-| Last name | field ID, or a Name field split | yes |
-| Street | field ID (`address`, `street`, …) | yes |
+| First name | field ID or label, or a Name field split | yes |
+| Last name | field ID or label, or a Name field split | yes |
+| Street | field ID or label (`address`, `street`, …) | yes |
 | City | `data-upd="city"` only | no |
 | Region | `data-upd="region"` only | no |
-| Postcode | field ID (`postcode`, `zip`, …) | no |
-| Country | field ID (`country`) | no |
+| Postcode | field ID or label (`postcode`, `zip`, …) | no |
+| Country | field ID or label (`country`) | no |
 
 Google needs at least an email, a phone number, or a complete address (first name, last name,
 postal code and country). Without one of those the `user_data` object is dropped and you get a bare
@@ -78,7 +91,9 @@ cannot be edited from the form builder. `email` and `tel` are decisive.
 **2. The field ID inside `form_fields[...]`.** This is typed in by whoever built the form, so
 `form_fields[email]` means only that somebody typed "email" into the Advanced tab.
 
-**3. The `autocomplete` attribute**, for a form whose field IDs are all `field_a1b2c3`.
+**3. The `autocomplete` attribute**, which Elementor does not set by default but a theme might.
+
+**4. The label, then the placeholder, then `aria-label`.** Matched whole, never as a substring.
 
 That order is not academic. Real Elementor markup exists in which a field labelled and placeholdered
 "Phone" is named `form_fields[email]`, while the actual email field sits on its generated ID
@@ -88,6 +103,21 @@ for exactly that markup.
 
 The phone number in that example is simply lost — there is no signal anywhere in the DOM saying it
 is a phone. Losing a field is the correct outcome; poisoning the email hash is not.
+
+**The label tier is not optional either.** Elementor generates a field ID like `field_0275ba1` for
+every field nobody renames, and nobody renames them. On the live form this was verified against,
+the phone, street, city, postcode and message fields all had generated IDs — so without the label
+the street and the postcode were being dropped entirely.
+
+It is matched by the same exact-match discipline as everything else: the **whole** normalised label
+against the allowlist. A substring test would read "Email us your question" as an email field, and a
+label is the freest text in the markup. `Street Address` matches. `Postcode*` matches. `Company
+Name`, `Name of your business` and `Message` do not.
+
+Note what this deliberately does **not** buy you: a field labelled `City` is still not collected,
+because `city` and `region` live behind `data-upd` and the name matcher never looks at them. On the
+verified form, "City" sits directly between "Street Address" and "Postcode" and is correctly left
+alone.
 
 Never read: `submit`, `step`, `html`, `hidden`, `password`, `upload`, `acceptance`, `recaptcha`,
 `recaptcha_v3` and `honeypot` field types. Plus any `type="password"` input whatever its wrapper
@@ -376,11 +406,17 @@ npx playwright install chromium
 node test/elementor-forms.test.mjs
 ```
 
-65 assertions. Among them: that a field labelled "Phone" but named `form_fields[email]` never
-reaches `sha256_email_address`; that a hidden earlier step of a multi-step form is still read; that a
-plain non-Elementor form sitting beside an Elementor one is never reported as a conversion; that
-three installs of the tag still push once; and that a success event arriving in the same tick as
-submit still delivers the hashed data.
+79 assertions. Fourteen of them run against markup taken verbatim from a live Elementor Pro 3.5.2
+contact form, and assert exactly what that form yields — including that the form id falls back to
+the widget's `data-id` because the install renders no `form_id` input at all, that the phone is
+found by its type class alone, that the street and postcode are found only by their labels, and that
+the "City" field sitting between them is still left alone.
+
+Among the rest: that a field labelled "Phone" but named `form_fields[email]` never reaches
+`sha256_email_address`; that a hidden earlier step of a multi-step form is still read; that a plain
+non-Elementor form sitting beside an Elementor one is never reported as a conversion; that three
+installs of the tag still push once; and that a success event arriving in the same tick as submit
+still delivers the hashed data.
 
 Read the header of the test file before trusting that number. It explains what these tests do and do
 not prove.
