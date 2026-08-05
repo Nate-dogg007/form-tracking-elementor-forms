@@ -180,12 +180,12 @@ match, with no error reported anywhere.
 
 ## GTM setup
 
-Seven steps, in this order. Step 1 first, because until it is done Google discards everything the
+Eight steps, in this order. Step 1 first, because until it is done Google discards everything the
 rest of this sends and tells you nothing.
 
-**Already set this up for another form type?** Steps 1, 2, 3 and 5 are shared — the same variables
-and the same Google Ads tag serve all of them. You only need step 4: a trigger on
-`elementor_form_submit`, added to the conversion tag you already have.
+**Already set this up for another form type?** Steps 1, 2, 3, 5 and 6 are shared — the same
+variables and the same two tags serve all of them. You only need step 4: a trigger on
+`elementor_form_submit`, added to the tags you already have.
 
 Names in backticks are what to type. Keep them exactly as written and the later steps will reference
 variables that already exist.
@@ -278,7 +278,7 @@ of those. If you genuinely want every form, use All Custom Events knowingly rath
 hashes like `bc7d48e`, but the form name is whatever was typed in the editor, and it survives the
 widget being duplicated onto another page.
 
-Not sure what your form's id or name is? Do step 6 first with a temporary All Custom Events trigger,
+Not sure what your form's id or name is? Do step 7 (Preview) first with a temporary All Custom Events trigger,
 read the values off the event, then come back and add the condition.
 
 ---
@@ -303,7 +303,82 @@ undefined and the conversion fires without enhanced data, which is what you want
 
 ---
 
-### Step 6 — Preview and check
+### Step 6 — The GA4 event (if you want this in Analytics too)
+
+Nothing so far sends anything to GA4. **The dataLayer does not reach GA4 on its own** — it is a
+message bus inside the browser, and GA4 receives only what a GA4 tag explicitly sends. The event
+name GA4 records is whatever you type in that tag, unrelated to the dataLayer event name.
+
+**Before you build one, check the container for a catch-all.** If someone has previously made a GA4
+Event tag on an **All Custom Events** trigger with `{{Event}}` as its name, it already forwards every
+dataLayer event indiscriminately, and `elementor_form_submit` is already arriving in GA4. Adding a
+second tag then double-counts. Containers that have been through a few hands often have one.
+
+**Tags → New → Tag Configuration → Google Analytics: GA4 Event.**
+
+1. **Measurement ID** — the property you want this in.
+2. **Event Name:** `generate_lead`. See the note below before choosing.
+3. **Event Parameters**, if you want to segment by form:
+
+   | Parameter Name | Value |
+   |---|---|
+   | `form_id` | `{{DLV - form_id}}` |
+   | `form_name` | `{{DLV - form_name}}` |
+
+4. **Advanced Settings → Consent Settings → Require additional consent for tag to fire**, and add
+   `analytics_storage`. Not `ad_storage` — that is the Ads tag's requirement, and they are separate
+   permissions.
+5. **Triggering:** the same trigger from step 4.
+6. Name it `GA4 - Lead` and save.
+
+To report on those parameters you also have to register them in GA4 as custom dimensions
+(**Admin → Custom definitions → Create custom dimension**, event-scoped). Until you do, the data
+arrives but nothing will display it.
+
+**Then mark it a key event:** **Admin → Key events → New key event**, and type the event name. You
+can do that before GA4 has ever seen the event; you do not have to wait for the first hit.
+
+#### Do not send `user_data` to GA4
+
+It exists for the Ads tag's User-Provided Data variable and nothing else. Adding the dataLayer
+variables wholesale as event parameters pushes hashed email and phone numbers into Analytics, which
+is against Google's Analytics policy. `form_id` and `form_name` are safe; the `user_data` object is
+not.
+
+#### Choosing the event name
+
+`form_submit` is the one name to avoid — GA4's enhanced measurement already collects an automatic
+event by exactly that name, and it fires on **attempt**, listening for the native submit event that
+Elementor does fire. This script fires only on **success**. Reuse the name and you get a count that
+is part-attempts and part-successes with no way to separate them.
+
+Beyond that, either works:
+
+- **`elementor_form_submit`** — matches the dataLayer name, so there is one string to search for
+  across Preview, DebugView and the events list. Easiest to debug.
+- **`generate_lead`** — a GA4 recommended event, which gets better treatment in the standard
+  reports. More useful across several sites: the sibling scripts push `html_form_submit`,
+  `nj_form_submit`, `cf7_form_submit` and `gf_form_submit`, so passing the dataLayer name through
+  gives you five separate GA4 events to mark as five separate key events, and any cross-site
+  reporting has to union them. Mapping them all to `generate_lead` gives one key event meaning the
+  same thing everywhere, split back out by `form_name` when you need it.
+
+On a single site it makes little difference. Across a portfolio it makes a lot.
+
+#### Keep one path into Google Ads
+
+If you mark this a key event in GA4 **and** import it into Google Ads as a conversion, while the
+Ads conversion tag from step 5 is also firing on the same trigger, Ads counts every submission
+twice.
+
+Keep the Ads conversion tag as the thing Ads bids on and treat the GA4 event as reporting. That is
+not just tidiness: **enhanced conversions only work down the Ads-tag path.** The user-provided data
+rides on that tag. A GA4 key event imported into Ads uses GA4's own separate user-provided-data
+mechanism instead, so importing it would cost you the one thing this script exists to do.
+
+---
+
+### Step 7 — Preview and check
 
 **Preview**, load the site, submit a test form.
 
@@ -313,7 +388,9 @@ In the Tag Assistant window:
    or `submit_success` is not firing. See "If no event fires" below.
 2. Click the event, then the **Variables** tab. `{{DLV - user_data}}` should hold an object with
    `sha256_email_address`.
-3. Check the **Tags** tab shows `Google Ads - Lead conversion` fired.
+3. Check the **Tags** tab shows `Google Ads - Lead conversion` fired — and `GA4 - Lead` too, if you
+   built it. Check it fired **once**, not twice: a second firing is the catch-all tag warned about
+   in step 6.
 
 **If the event fires but `user_data` is empty**, consent is being read as denied. Open the browser
 console — the script logs one warning explaining exactly that. It fails closed, so no readable
@@ -321,7 +398,7 @@ console — the script logs one warning explaining exactly that. It fails closed
 
 ---
 
-### Step 7 — Publish, then confirm properly
+### Step 8 — Publish, then confirm properly
 
 Submit the container.
 
@@ -329,6 +406,10 @@ GTM Preview proves the event fires and the tag runs. It does **not** prove Googl
 matched the data. For that, go back to **Goals → Conversions**, click the conversion action, and
 look at the **Enhanced conversions diagnostics** panel. It takes a day or two to populate and it is
 the only honest confirmation that any of this worked.
+
+For the GA4 side, **Admin → DebugView** shows the event arriving in real time while Preview is on,
+and the standard **Reports → Engagement → Events** list catches up within a day. The parameters will
+not appear anywhere until the custom dimensions from step 6 are registered.
 
 ## Diagnostic — run this first
 
