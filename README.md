@@ -7,8 +7,8 @@ Reads Elementor Pro form submissions, normalises and SHA-256 hashes the user-pro
 Google Ads wants, and pushes one `elementor_form_submit` event to the dataLayer. Personal data is
 only ever read once your CMP has granted `ad_user_data`, re-checked on every submission.
 
-**Install is one GTM Custom HTML tag.** Paste the file in, set one country code, trigger on All
-Pages.
+**Install is one GTM Custom HTML tag.** Paste the file in, set three constants — a country code,
+`CONSENT_MODE`, and whether to assume that country on addresses — and trigger on All Pages.
 
 ## What is verified, and what is not
 
@@ -222,7 +222,28 @@ filled from `DEFAULT_COUNTRY`.
 1. **Tags → New → Tag Configuration → Custom HTML.**
 2. Open the `elementor-forms` file in this repo, select **all of it**, and paste it into the HTML
    box. Include the `<script>` and `</script>` lines.
-3. Set `DEFAULT_COUNTRY` to the country most of this site's visitors are in.
+3. Set the three constants in the config block near the top. Each is a question about the site,
+   not a preference:
+
+   ```js
+   var DEFAULT_COUNTRY        = 'GB';    // where are most of this site's visitors?
+   var CONSENT_MODE           = 'cmp';   // does this site have a cookie banner?
+   var ASSUME_DEFAULT_COUNTRY = false;   // do enquiries come from one country?
+   ```
+
+   `DEFAULT_COUNTRY` turns national phone formats into E.164 and is the one that quietly ruins
+   everything if it is wrong — see below.
+
+   `CONSENT_MODE` is `'cmp'` if the site has a consent banner and `'none'` if it does not. It
+   decides whether anything is collected at all when no consent signal is present, so read the
+   Consent section before setting `'none'` — it is a statement about the deployment and the script
+   trusts you.
+
+   `ASSUME_DEFAULT_COUNTRY` is the one most sites need and nobody expects. Google discards an
+   address unless it has first name, last name, postcode **and** country together — and almost no
+   lead form asks for country. Set it to `true` and country is filled from `DEFAULT_COUNTRY`;
+   leave it `false` and most forms will send no address at all. Set it only where enquiries
+   genuinely come from one country.
 4. **Triggering → All Pages.**
 5. Save.
 

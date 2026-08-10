@@ -7,8 +7,15 @@
   ─────────────────────────────────────────────────────────────
   HOW TO INSTALL
 
-    ONE GTM Custom HTML tag. Paste this whole file in, set
-    DEFAULT_COUNTRY below, trigger it on All Pages, save.
+    ONE GTM Custom HTML tag. Paste this whole file in, set the three
+    constants in CONFIG below — DEFAULT_COUNTRY, CONSENT_MODE and
+    ASSUME_DEFAULT_COUNTRY — trigger it on All Pages, save.
+
+    CONSENT_MODE decides whether anything is collected at all when the page
+    emits no consent signal. ASSUME_DEFAULT_COUNTRY is the one most sites
+    need and nobody expects: Google throws an address away unless it has
+    first name, last name, postcode AND country, and almost no lead form
+    asks for country. Leave it false and most forms send no address.
 
   HOW IT CAPTURES
 
