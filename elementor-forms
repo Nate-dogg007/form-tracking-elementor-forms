@@ -272,8 +272,6 @@
      ad_user_data is the current state. Override with
      window.formTrackingConsentFn if your CMP does something unusual.    */
 
-  var warnedNoConsentSignal = false;
-
   /*
     Known CMPs, by the cheapest reliable fingerprint each one leaves on the
     page. This list exists for exactly one purpose: to contradict
@@ -1128,6 +1126,27 @@
       early would report the outcome the submit expected rather than the
       one that occurred.
     */
+    /*
+      Consent is re-read here, not only at capture. Elementor hashes at
+      submit and pushes at submit_success, and a visitor can reject the
+      banner in between — which is exactly the window this two-phase shape
+      opens. The point of gating the payload is that it reflects the answer
+      at the moment of disclosure, and that moment is this one, not the
+      submit. A later denial overrides whatever the capture decided.
+
+      The README claimed this happened long before it did. It did not, and
+      rewriting the section is what turned the claim up.
+    */
+    if (pending.userData || pending.promise) {
+      var again = consentDecision();
+      if (!again.collect) {
+        pending.userData = null;
+        pending.promise = null;
+        pending.status = again.status;
+        pending.cmp = again.cmp;
+      }
+    }
+
     var send = function (userData) {
       var payload = {
         event: EVENT_NAME,

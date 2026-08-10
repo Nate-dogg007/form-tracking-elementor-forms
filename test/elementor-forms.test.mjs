@@ -140,6 +140,13 @@ const PARTIAL_ADDRESS_FORM = widget('par71a1', 'Partial', `
   ${group('text', 'postcode', '<input size="1" type="text" name="form_fields[postcode]" value="SO99 9XX">')}
 `);
 
+// Matchable at submit, useless afterwards: a postcode on its own is not an
+// identifier and cannot complete an address, so buildUserData resolves to
+// null. That async transition had no fixture at all.
+const POSTCODE_ONLY_FORM = widget('p05tc0d', 'Postcode only', `
+  ${group('text', 'postcode', '<input size="1" type="text" name="form_fields[postcode]" value="SO99 9XX">')}
+`);
+
 const PASSWORD_FORM = widget('pw00001', 'Register', `
   ${group('email', 'email', '<input size="1" type="email" name="form_fields[email]" value="victim@example.com">')}
   ${group('password', 'password', '<input size="1" type="password" name="form_fields[password]" value="hunter2">')}
@@ -272,6 +279,7 @@ const NOT_ELEMENTOR = `
 const PAGES = {
   '/standard': STANDARD_FORM,
   '/partial-address': PARTIAL_ADDRESS_FORM,
+  '/postcode-only': POSTCODE_ONLY_FORM,
   '/mislabelled': MISLABELLED_FORM,
   '/opaque': OPAQUE_FORM,
   '/address': ADDRESS_FORM,
@@ -346,6 +354,7 @@ async function run(path, opts = {}) {
   const pg = await ctx.newPage();
   const records = [];
   await pg.exposeFunction('__record', (o) => { records.push(o); });
+  if (opts.onConsole) pg.on('console', opts.onConsole);
   await pg.addInitScript(SHIM);
   if (opts.consent !== 'none') {
     await pg.addInitScript(`window.dataLayer.push(['consent','default',
@@ -857,6 +866,69 @@ console.log('\nthe address block is all four fields or none');
   check('ASSUME_DEFAULT_COUNTRY completes the same form',
     addr.country === 'GB' && !!addr.postal_code &&
     !!addr.sha256_first_name && !!addr.sha256_last_name, JSON.stringify(addr));
+}
+
+
+console.log('\nno_fields, and the warnings that are the only remedy');
+{
+  // Fields matched at submit, but nothing survived as an identifier. This
+  // is the async branch — buildUserData resolving to null — which is
+  // reached by no other fixture.
+  const { submissions } = await run('/postcode-only');
+  check("a postcode alone reports 'no_fields'",
+    submissions[0]?.user_data_status === 'no_fields', submissions[0]?.user_data_status);
+  check('and carries no user_data', !submissions[0]?.user_data);
+  check('and the conversion still fires', submissions.length === 1);
+}
+{
+  // The synchronous branch: nothing matchable was found at all.
+  const { submissions } = await run('/password');
+  check("a form with nothing matchable also reports 'no_fields'",
+    submissions[0]?.user_data_status === 'no_fields', submissions[0]?.user_data_status);
+}
+{
+  // For region_unresolved the warning is the whole remedy: the status says
+  // collection did not happen, only the warning says what to do about it.
+  const warnings = [];
+  await run('/standard', { consent: 'none',
+    onConsole: (m) => { if (m.type() === 'warning') warnings.push(m.text()); },
+    before: `window.dataLayer.push(['consent','default',{ ad_user_data: 'denied', region: ['GB'] }]);
+             window.dataLayer.push(['consent','default',{ ad_user_data: 'granted' }]);` });
+  const w = warnings.join(' | ');
+  check('the region warning explains the cause and names the way out',
+    /per region/.test(w) && /formTrackingConsentFn/.test(w), w);
+}
+{
+  const warnings = [];
+  await run('/standard', { consent: 'none', consentMode: 'none',
+    onConsole: (m) => { if (m.type() === 'warning') warnings.push(m.text()); },
+    before: `window.OneTrust = {};` });
+  check("declaring 'none' with a CMP present warns, not just flags",
+    /CONSENT_MODE is "none"/.test(warnings.join(' | ')) &&
+    /OneTrust/.test(warnings.join(' | ')), warnings.join(' | '));
+}
+{
+  const warnings = [];
+  await run('/standard', { consent: 'none', consentMode: 'None',
+    onConsole: (m) => { if (m.type() === 'warning') warnings.push(m.text()); } });
+  check('a mis-cased CONSENT_MODE names the offending value',
+    /"None"/.test(warnings.join(' | ')) && /neither/.test(warnings.join(' | ')),
+    warnings.join(' | '));
+}
+{
+  // Withdrawal between capture and commit. Elementor hashes at submit and
+  // pushes at submit_success; the visitor can reject the banner in between.
+  const { submissions } = await run('/standard', {
+    before: `var __origSuccess = window.__success;
+             window.__success = function (sel) {
+               window.dataLayer.push(['consent','update',{ ad_user_data: 'denied' }]);
+               return __origSuccess(sel);
+             };` });
+  check('consent withdrawn between submit and success is honoured',
+    !submissions[0]?.user_data, JSON.stringify(submissions[0]?.user_data));
+  check("and it reports 'consent_denied', not 'collected'",
+    submissions[0]?.user_data_status === 'consent_denied', submissions[0]?.user_data_status);
+  check('and the conversion still fires', submissions.length === 1);
 }
 
 /* ── Result ──────────────────────────────────────────────────────────── */
