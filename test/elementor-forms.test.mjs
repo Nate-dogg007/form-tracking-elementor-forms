@@ -916,6 +916,19 @@ console.log('\nno_fields, and the warnings that are the only remedy');
     warnings.join(' | '));
 }
 {
+  const { submissions } = await run('/standard', { consent: 'none', consentMode: 'None' });
+  check('a mis-cased CONSENT_MODE fails closed, not open',
+    submissions[0]?.user_data_status === 'no_consent_signal' &&
+    !submissions[0]?.user_data, JSON.stringify(submissions[0]));
+}
+{
+  const { submissions } = await run('/standard', { consent: 'none',
+    before: `window.dataLayer.push(['consent','default',{ ad_user_data: 'granted', region: [] }]);` });
+  check('an empty region array is not region-scoped',
+    submissions[0]?.user_data_status === 'collected' && !!submissions[0]?.user_data,
+    submissions[0]?.user_data_status);
+}
+{
   // Withdrawal between capture and commit. Elementor hashes at submit and
   // pushes at submit_success; the visitor can reject the banner in between.
   const { submissions } = await run('/standard', {

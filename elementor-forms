@@ -415,7 +415,11 @@
 
           Region-scoped defaults are noted, not read — see below.
         */
-        if (command === 'default' && settings.region) {
+        // Length-checked, not just truthy: some CMPs emit `region: []`
+        // rather than omitting the key, and an empty array is truthy in
+        // JavaScript — which turned a perfectly readable global default
+        // into region_unresolved and collected nothing.
+        if (command === 'default' && settings.region && settings.region.length) {
           sawRegionScoped = true;
           continue;
         }
