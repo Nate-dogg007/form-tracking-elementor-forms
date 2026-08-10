@@ -38,11 +38,23 @@ const SOURCE = RAW.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
 const EVENT_NAME = 'elementor_form_submit';
 const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
 
-const script = (country) => {
-  if (!country) return SOURCE;
-  const flag = `var DEFAULT_COUNTRY = '${country}';`;
-  const out = SOURCE.replace(/var DEFAULT_COUNTRY = '[A-Za-z]{2}';/, flag);
-  if (!out.includes(flag)) throw new Error('could not set DEFAULT_COUNTRY');
+const script = (country, consentMode, assumeCountry) => {
+  let out = SOURCE;
+  if (country) {
+    const flag = `var DEFAULT_COUNTRY = '${country}';`;
+    out = out.replace(/var DEFAULT_COUNTRY = '[A-Za-z]{2}';/, flag);
+    if (!out.includes(flag)) throw new Error('could not set DEFAULT_COUNTRY');
+  }
+  if (consentMode) {
+    const flag = `var CONSENT_MODE = '${consentMode}';`;
+    out = out.replace(/var CONSENT_MODE = '[a-z]+';/, flag);
+    if (!out.includes(flag)) throw new Error('could not set CONSENT_MODE');
+  }
+  if (assumeCountry) {
+    const flag = 'var ASSUME_DEFAULT_COUNTRY = true;';
+    out = out.replace(/var ASSUME_DEFAULT_COUNTRY = false;/, flag);
+    if (!out.includes(flag)) throw new Error('could not set ASSUME_DEFAULT_COUNTRY');
+  }
   return out;
 };
 
@@ -77,6 +89,8 @@ const STANDARD_FORM = widget('bc7d48e', 'Request a callback', `
   ${group('textarea', 'message', '<textarea name="form_fields[message]" id="form-field-message" class="elementor-field elementor-field-textual">Please call about my sickness absence</textarea>')}
   ${group('text', 'company', '<input size="1" type="text" name="form_fields[company]" id="form-field-company" class="elementor-field elementor-field-textual" value="Acme Widgets Ltd">')}
   ${group('acceptance', 'acceptance', '<input type="checkbox" name="form_fields[acceptance]" id="form-field-acceptance" class="elementor-field-option" value="on" checked>')}
+  ${group('text', 'postcode', '<input size="1" type="text" name="form_fields[postcode]" id="form-field-postcode" class="elementor-field elementor-field-textual" value="SO99 9XX">')}
+  ${group('text', 'country', '<input size="1" type="text" name="form_fields[country]" id="form-field-country" class="elementor-field elementor-field-textual" value="United Kingdom">')}
   ${group('hidden', 'gclid', '<input type="hidden" name="form_fields[gclid]" id="form-field-gclid" value="Cj0KCQiA-secret-click-id">')}
 `);
 
@@ -98,6 +112,8 @@ const OPAQUE_FORM = widget('a1b2c3d', 'Opaque', `
   ${group('text', 'field_9989e91', '<input size="1" type="text" name="form_fields[field_9989e91]" autocomplete="family-name" value="Doe">')}
   ${group('email', 'field_d8eb177', '<input size="1" type="email" name="form_fields[field_d8eb177]" value="opaque@example.com">')}
   ${group('tel', 'field_e6f9a87', '<input size="1" type="tel" name="form_fields[field_e6f9a87]" value="07700 900789">')}
+  ${group('text', 'field_bbb2222', '<input size="1" type="text" name="form_fields[field_bbb2222]" autocomplete="postal-code" value="SO99 9XX">')}
+  ${group('text', 'field_ccc3333', '<input size="1" type="text" name="form_fields[field_ccc3333]" autocomplete="country-name" value="United Kingdom">')}
   ${group('text', 'field_aaa1111', '<input size="1" type="text" name="form_fields[field_aaa1111]" value="nothing identifiable">')}
 `);
 
@@ -113,6 +129,15 @@ const ADDRESS_FORM = widget('add7e55', 'Quote request', `
   ${group('text', 'postcode', '<input size="1" type="text" name="form_fields[postcode]" value="SO99 9XX">')}
   ${group('select', 'country', '<select name="form_fields[country]"><option value="United Kingdom" selected>UK</option></select>')}
   ${group('text', 'city', '<input size="1" type="text" name="form_fields[city]" value="not the one with data-upd">')}
+`);
+
+// Name and postcode but no country: three of Google's four required address
+// fields. The shape almost every UK lead form has, and the one that produced
+// the live "addresses are missing required fields" warning.
+const PARTIAL_ADDRESS_FORM = widget('par71a1', 'Partial', `
+  ${group('text', 'name', '<input size="1" type="text" name="form_fields[name]" value="Jane Ann Smith">')}
+  ${group('email', 'email', '<input size="1" type="email" name="form_fields[email]" value="partial@example.com">')}
+  ${group('text', 'postcode', '<input size="1" type="text" name="form_fields[postcode]" value="SO99 9XX">')}
 `);
 
 const PASSWORD_FORM = widget('pw00001', 'Register', `
@@ -201,6 +226,11 @@ const ROLLERDOR_FORM = `
 								Postcode							</label>
 <input size="1" type="text" name="form_fields[field_33bb4d3]" id="form-field-field_33bb4d3" class="elementor-field elementor-size-md  elementor-field-textual" placeholder="Postcode*" required="required" aria-required="true" value="SO99 9XX">
 </div>
+<div class="elementor-field-type-text elementor-field-group elementor-column elementor-field-group-field_9c41d02 elementor-col-33">
+<label for="form-field-field_9c41d02" class="elementor-field-label elementor-screen-only">
+								Country							</label>
+<input size="1" type="text" name="form_fields[field_9c41d02]" id="form-field-field_9c41d02" class="elementor-field elementor-size-md  elementor-field-textual" placeholder="Country" value="United Kingdom">
+</div>
 <div class="elementor-field-type-hidden elementor-field-group elementor-column elementor-field-group-field_2a63952 elementor-col-100">
 </div>
 <div class="elementor-field-type-textarea elementor-field-group elementor-column elementor-field-group-field_35b8921 elementor-col-66">
@@ -241,6 +271,7 @@ const NOT_ELEMENTOR = `
 
 const PAGES = {
   '/standard': STANDARD_FORM,
+  '/partial-address': PARTIAL_ADDRESS_FORM,
   '/mislabelled': MISLABELLED_FORM,
   '/opaque': OPAQUE_FORM,
   '/address': ADDRESS_FORM,
@@ -320,7 +351,10 @@ async function run(path, opts = {}) {
     await pg.addInitScript(`window.dataLayer.push(['consent','default',
       { ad_user_data: 'granted', ad_storage: 'granted' }]);`);
   }
-  for (let i = 0; i < (opts.installs || 1); i++) await pg.addInitScript(script(opts.country));
+  if (opts.preScript) await pg.addInitScript(opts.preScript);
+  for (let i = 0; i < (opts.installs || 1); i++) {
+    await pg.addInitScript(script(opts.country, opts.consentMode, opts.assumeCountry));
+  }
   await pg.goto(`${BASE}${path}`);
   if (opts.before) await pg.evaluate(opts.before);
   if (opts.submit !== false) {
@@ -414,8 +448,8 @@ console.log('\nfield mapping on a standard form');
   const keys = Object.keys(ud).concat(Object.keys(addr)).sort();
   check('only expected keys are present, nothing extra',
     keys.join(',') === [
-      'address', 'sha256_email_address', 'sha256_first_name',
-      'sha256_last_name', 'sha256_phone_number'
+      'address', 'country', 'postal_code', 'sha256_email_address',
+      'sha256_first_name', 'sha256_last_name', 'sha256_phone_number'
     ].sort().join(','), keys.join(','));
 }
 
@@ -578,8 +612,9 @@ console.log('\nlive markup: Elementor Pro 3.5.2 (rollerdor.net/contact)');
   const keys = Object.keys(ud).concat(Object.keys(addr)).sort();
   check('only expected keys are present, nothing extra',
     keys.join(',') === [
-      'address', 'postal_code', 'sha256_email_address', 'sha256_first_name',
-      'sha256_last_name', 'sha256_phone_number', 'sha256_street'
+      'address', 'country', 'postal_code', 'sha256_email_address',
+      'sha256_first_name', 'sha256_last_name', 'sha256_phone_number',
+      'sha256_street'
     ].sort().join(','), keys.join(','));
 }
 
@@ -690,6 +725,138 @@ console.log('\nedge cases');
     errors.length === 0, errors.join('; '));
   check('...and reports nothing rather than guessing a form',
     records.filter((r) => r.event === EVENT_NAME).length === 0);
+}
+
+
+/*
+  Expected statuses are hand-written literals. Deriving them from the
+  script's own constants would make the assertions agree with a typo, which
+  is how a suite goes green while the field is broken.
+*/
+console.log('\nuser_data_status says why');
+{
+  const { submissions } = await run('/standard');
+  check("a grant reports 'collected'",
+    submissions[0]?.user_data_status === 'collected', submissions[0]?.user_data_status);
+  check('and adds no cmp_detected', !('cmp_detected' in (submissions[0] || {})));
+}
+{
+  const { submissions } = await run('/standard', { consent: 'none',
+    before: `window.dataLayer.push(['consent','update',{ ad_user_data: 'denied' }]);` });
+  check("a denial reports 'consent_denied'",
+    submissions[0]?.user_data_status === 'consent_denied', submissions[0]?.user_data_status);
+  check('and carries no user_data', !submissions[0]?.user_data);
+}
+{
+  const { submissions } = await run('/standard', { consent: 'none' });
+  check("silence under CONSENT_MODE 'cmp' reports 'no_consent_signal'",
+    submissions[0]?.user_data_status === 'no_consent_signal', submissions[0]?.user_data_status);
+  check('and the conversion still fires', submissions.length === 1);
+}
+{
+  const { submissions } = await run('/standard', { consent: 'none', consentMode: 'none' });
+  check("silence under CONSENT_MODE 'none' collects and says so",
+    submissions[0]?.user_data_status === 'collected_undeclared' && !!submissions[0]?.user_data,
+    submissions[0]?.user_data_status);
+}
+{
+  const { submissions } = await run('/mislabelled', { selector: 'form' });
+  check('a form with matchable fields still reports collected',
+    submissions[0]?.user_data_status === 'collected', submissions[0]?.user_data_status);
+}
+{
+  const { submissions } = await run('/standard', {
+    preScript: `Object.defineProperty(window, 'crypto', { value: {}, configurable: true });` });
+  check("no SubtleCrypto reports 'no_crypto'",
+    submissions[0]?.user_data_status === 'no_crypto', submissions[0]?.user_data_status);
+  check('and the conversion still fires', submissions.length === 1);
+}
+{
+  // Regression from the sibling plugin: a synchronous throw goes past
+  // .catch and out of capture(), which left no pending state and no event.
+  const { submissions } = await run('/standard', {
+    before: `window.crypto.subtle.digest = function () { throw new Error('blocked'); };` });
+  check('a synchronous crypto failure still fires the conversion',
+    submissions.length === 1, `got ${submissions.length}`);
+  check("and reports 'error'",
+    submissions[0]?.user_data_status === 'error', submissions[0]?.user_data_status);
+}
+
+console.log('\nregion-scoped consent cannot be resolved in a browser');
+{
+  const { submissions } = await run('/standard', { consent: 'none',
+    before: `window.dataLayer.push(['consent','default',{ ad_user_data: 'denied', region: ['GB','ES'] }]);
+             window.dataLayer.push(['consent','default',{ ad_user_data: 'granted' }]);` });
+  check('a regional deny + global grant collects nothing',
+    !submissions[0]?.user_data, JSON.stringify(submissions[0]?.user_data));
+  check("and reports 'region_unresolved'",
+    submissions[0]?.user_data_status === 'region_unresolved', submissions[0]?.user_data_status);
+}
+{
+  const { submissions } = await run('/standard', { consent: 'none',
+    before: `window.dataLayer.push(['consent','default',{ ad_user_data: 'denied', region: ['GB'] }]);
+             window.dataLayer.push(['consent','default',{ ad_user_data: 'granted' }]);
+             window.dataLayer.push(['consent','update',{ ad_user_data: 'granted' }]);` });
+  check('but a global update still resolves it',
+    submissions[0]?.user_data_status === 'collected' && !!submissions[0]?.user_data,
+    submissions[0]?.user_data_status);
+}
+{
+  const { submissions } = await run('/standard', { consent: 'none',
+    before: `window.dataLayer.push(['consent','update',{ ad_user_data: 'granted', region: ['GB'] }]);` });
+  check('a region key on an update does not make it unresolvable',
+    submissions[0]?.user_data_status === 'collected', submissions[0]?.user_data_status);
+}
+
+console.log('\nCMP detection contradicts the declaration, never decides it');
+{
+  const { submissions } = await run('/standard', { consent: 'none',
+    before: `var s = document.createElement('script');
+             s.id = 'cookieBanner-143376892';
+             document.head.appendChild(s);` });
+  check('a silent CMP is named rather than just missing',
+    submissions[0]?.user_data_status === 'no_consent_signal' &&
+    submissions[0]?.cmp_detected === 'HubSpot', JSON.stringify(submissions[0]));
+}
+{
+  const { submissions } = await run('/standard', { consent: 'none', consentMode: 'none',
+    before: `window.OneTrust = {};` });
+  check("declaring 'none' with a CMP present is flagged",
+    submissions[0]?.cmp_detected === 'OneTrust', submissions[0]?.cmp_detected);
+  check('but the declaration still governs — it collects', !!submissions[0]?.user_data);
+}
+
+console.log('\nthe address block is all four fields or none');
+{
+  // /mislabelled has an email and a phone but no address parts at all.
+  const { submissions } = await run('/mislabelled');
+  check('a form with no address parts sends no address block',
+    !submissions[0]?.user_data?.address,
+    JSON.stringify(submissions[0]?.user_data?.address));
+}
+{
+  const { submissions } = await run('/address');
+  const addr = submissions[0]?.user_data?.address || {};
+  check('a form carrying all four still sends the address',
+    !!(addr.sha256_first_name && addr.sha256_last_name &&
+       addr.postal_code && addr.country === 'GB'), JSON.stringify(addr));
+}
+{
+  // Three of four. Google discards the whole block and warns, so sending it
+  // is hashed personal data in a page-global array for nothing.
+  const { submissions } = await run('/partial-address');
+  const ud = submissions[0]?.user_data || {};
+  check('name + postcode with no country sends no address at all',
+    !ud.address, JSON.stringify(ud.address));
+  check('but the email still goes, so the lead is not lost',
+    ud.sha256_email_address === sha256('partial@example.com'), JSON.stringify(ud));
+}
+{
+  const { submissions } = await run('/partial-address', { assumeCountry: true });
+  const addr = submissions[0]?.user_data?.address || {};
+  check('ASSUME_DEFAULT_COUNTRY completes the same form',
+    addr.country === 'GB' && !!addr.postal_code &&
+    !!addr.sha256_first_name && !!addr.sha256_last_name, JSON.stringify(addr));
 }
 
 /* ── Result ──────────────────────────────────────────────────────────── */
