@@ -647,9 +647,12 @@
 
   function normPostal(v) {
     // Collapse internal whitespace rather than stripping it. Google
-    // normalises postal codes itself and its own worked example keeps the
-    // space (SO99 9XX), so there is nothing to gain from a lossier
-    // transform on the one address key UK matching leans on.
+    // documents no normalisation for postal codes — they are sent in the
+    // clear and matched on the raw string — so there is nothing to gain
+    // from a lossier transform on the one address key UK matching leans on.
+    // (An earlier version of this comment cited a Google worked example
+    // keeping the space. That example could not be found; the reasoning
+    // stands without it.)
     var s = String(v).trim().toLowerCase().replace(/\s+/g, ' ');
     if (!s || s.length > 12 || s.indexOf('@') !== -1) return '';
     return s;
@@ -746,13 +749,21 @@
         usable and the value it is short of is the same for every visitor
         the site has.
 
+        Two things to be honest about. This is an INFERRED value, not one
+        the visitor gave — Google's customer-data policy describes
+        first-party data as information shared directly by the customer, and
+        a site-wide default is not that. And it only fires when no country
+        field was seen at all: a visitor who answered, in words the alias
+        table could not read, keeps their answer and the address is withheld
+        rather than relabelled.
+
         Only the country is ever assumed. Guarding this on the rest of the
         set being present would read as extra safety and be dead code — the
-        completeness test below already discards an address that is short
-        of anything, so stamping a country onto one that is going to be
+        completeness test below already discards an address short of
+        anything, so stamping a country onto one that is going to be
         dropped changes nothing.
       */
-      if (ASSUME_DEFAULT_COUNTRY && !address.country) {
+      if (ASSUME_DEFAULT_COUNTRY && !address.country && !raw.country_supplied) {
         var assumed = normalise('country', DEFAULT_COUNTRY);
         if (assumed) address.country = assumed;
       }
@@ -980,6 +991,15 @@
       }
 
       if (raw[key]) continue;
+      /*
+        Noted before validation, because "no country field" and "a country
+        field we could not read" have to be told apart. They both leave
+        raw.country unset, and ASSUME_DEFAULT_COUNTRY must only fill the
+        first — a visitor who answered Greece, which is not in the alias
+        table, would otherwise have their answer replaced with the site
+        default and their address sent somewhere they have never been.
+      */
+      if (key === 'country') raw.country_supplied = true;
       var norm = normalise(key, value);
       if (!norm) continue;
       raw[key] = norm;

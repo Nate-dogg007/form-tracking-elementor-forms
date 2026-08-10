@@ -147,6 +147,15 @@ const POSTCODE_ONLY_FORM = widget('p05tc0d', 'Postcode only', `
   ${group('text', 'postcode', '<input size="1" type="text" name="form_fields[postcode]" value="SO99 9XX">')}
 `);
 
+// A country the alias table does not carry. The visitor answered; we just
+// could not read it — which is not the same as not asking.
+const UNREADABLE_COUNTRY_FORM = widget('unr34d4', 'Unreadable country', `
+  ${group('text', 'first_name', '<input size="1" type="text" name="form_fields[first_name]" value="Nikos">')}
+  ${group('text', 'last_name', '<input size="1" type="text" name="form_fields[last_name]" value="Papadopoulos">')}
+  ${group('text', 'postcode', '<input size="1" type="text" name="form_fields[postcode]" value="10431">')}
+  ${group('select', 'country', '<select name="form_fields[country]"><option value="Greece" selected>Greece</option></select>')}
+`);
+
 const PASSWORD_FORM = widget('pw00001', 'Register', `
   ${group('email', 'email', '<input size="1" type="email" name="form_fields[email]" value="victim@example.com">')}
   ${group('password', 'password', '<input size="1" type="password" name="form_fields[password]" value="hunter2">')}
@@ -280,6 +289,7 @@ const PAGES = {
   '/standard': STANDARD_FORM,
   '/partial-address': PARTIAL_ADDRESS_FORM,
   '/postcode-only': POSTCODE_ONLY_FORM,
+  '/unreadable-country': UNREADABLE_COUNTRY_FORM,
   '/mislabelled': MISLABELLED_FORM,
   '/opaque': OPAQUE_FORM,
   '/address': ADDRESS_FORM,
@@ -742,6 +752,21 @@ console.log('\nedge cases');
   script's own constants would make the assertions agree with a typo, which
   is how a suite goes green while the field is broken.
 */
+{
+  // A visitor who ANSWERED must never have that answer replaced by the site
+  // default, even when the answer is one the alias table cannot read.
+  const { submissions } = await run('/unreadable-country', { assumeCountry: true });
+  check('an unreadable country answer is not overwritten with the default',
+    !submissions[0]?.user_data?.address,
+    JSON.stringify(submissions[0]?.user_data?.address));
+}
+{
+  const { submissions } = await run('/partial-address', { assumeCountry: true });
+  check('but a form that never asked is still completed',
+    submissions[0]?.user_data?.address?.country === 'GB',
+    JSON.stringify(submissions[0]?.user_data?.address));
+}
+
 console.log('\nuser_data_status says why');
 {
   const { submissions } = await run('/standard');
