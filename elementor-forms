@@ -2,13 +2,20 @@
 /*
   ░▒▓█ Elementor Pro Forms → Google Ads Enhanced Conversions █▓▒░
   Author:  Nathan O'Connor
-  Version: 1.0
+  Version: 1.1
 
   ─────────────────────────────────────────────────────────────
   HOW TO INSTALL
 
-    ONE GTM Custom HTML tag. Paste this whole file in, set
-    DEFAULT_COUNTRY below, trigger it on All Pages, save.
+    ONE GTM Custom HTML tag. Paste this whole file in, set the three
+    constants in CONFIG below — DEFAULT_COUNTRY, CONSENT_MODE and
+    ASSUME_DEFAULT_COUNTRY — trigger it on All Pages, save.
+
+    CONSENT_MODE decides whether anything is collected at all when the page
+    emits no consent signal. ASSUME_DEFAULT_COUNTRY is the one most sites
+    need and nobody expects: Google throws an address away unless it has
+    first name, last name, postcode AND country, and almost no lead form
+    asks for country. Leave it false and most forms send no address.
 
   HOW IT CAPTURES
 
@@ -82,9 +89,24 @@
   // and every hashed phone silently fails to match.
   var DEFAULT_COUNTRY = 'GB';
 
-  // When no ad_user_data signal can be found, treat that as denied rather
-  // than granted. Leave this on for UK/EU traffic.
-  var REQUIRE_EXPLICIT_CONSENT = true;
+  // Google will not use an address unless it has first name, last name,
+  // postcode AND country. Most lead forms collect the first three and never
+  // ask for country. Turn this on to fill country from DEFAULT_COUNTRY when
+  // it is the only field missing.
+  var ASSUME_DEFAULT_COUNTRY = false;
+
+  // Does this site have a consent management platform?
+  //
+  //   'cmp'  — yes. An ad_user_data signal is required. No signal means the
+  //            CMP is not wired to Consent Mode v2, so nothing is collected.
+  //   'none' — no. Nothing on the page gates collection and you have a
+  //            lawful basis, so collect when no signal is present.
+  //
+  // A signal always wins where there is one: 'none' still honours a denial
+  // if a CMP turns up and says no. This has to be declared because it
+  // cannot be worked out — "no CMP here" and "a CMP that never emits
+  // Consent Mode" are the same absence of a signal.
+  var CONSENT_MODE = 'cmp';
 
   // The dataLayer event name. Deliberately NOT `form_submit`: GA4's
   // enhanced measurement collects an automatic event by that exact name.
@@ -257,34 +279,124 @@
      ad_user_data is the current state. Override with
      window.formTrackingConsentFn if your CMP does something unusual.    */
 
+  /*
+    Known CMPs, by the cheapest reliable fingerprint each one leaves on the
+    page. This list exists for exactly one purpose: to contradict
+    CONSENT_MODE = 'none'. It never decides whether to collect.
+
+    That distinction is the whole point. A fingerprint list is always
+    incomplete — a custom banner or a CMP added next year will not be on it
+    — which makes it unfit to grant or deny anything. It is perfectly fit
+    to catch someone declaring 'none' on a site that visibly has a banner,
+    because a hit is conclusive even though a miss is not.
+  */
+  var CMP_SIGNATURES = [
+    ['CookieYes', function () {
+      return !!window.getCkyConsent ||
+             !!document.querySelector('script[src*="cookieyes"]');
+    }],
+    ['OneTrust', function () {
+      return !!window.OneTrust || !!window.Optanon;
+    }],
+    ['Cookiebot', function () {
+      return !!window.Cookiebot || !!document.getElementById('Cookiebot');
+    }],
+    ['HubSpot', function () {
+      return !!document.querySelector(
+        'script[src*="hs-banner.com"], script[id^="cookieBanner-"]');
+    }],
+    ['Complianz', function () {
+      return !!window.cmplz_get_cookie ||
+             !!document.querySelector('script[src*="complianz"]');
+    }],
+    ['Termly', function () {
+      return !!document.querySelector('script[src*="termly"]');
+    }],
+    ['Iubenda', function () {
+      return !!window._iub;
+    }],
+    ['Usercentrics', function () {
+      return !!window.UC_UI || !!window.usercentrics;
+    }],
+    ['Osano', function () {
+      return !!window.Osano;
+    }],
+    ['IAB TCF', function () {
+      return typeof window.__tcfapi === 'function';
+    }]
+  ];
+
+  function detectCmp() {
+    for (var i = 0; i < CMP_SIGNATURES.length; i++) {
+      try {
+        if (CMP_SIGNATURES[i][1]()) return CMP_SIGNATURES[i][0];
+      } catch (err) {
+        // A CMP that throws when probed is not worth failing a submission
+        // over. Treat it as absent and keep checking the rest.
+      }
+    }
+    return null;
+  }
+
   var warnedNoConsentSignal = false;
+  var warnedCmpContradiction = false;
+  var warnedBadConsentMode = false;
+  var warnedRegionUnresolved = false;
 
   /*
-    Returns true only on a positive, unambiguous grant. Every other
-    outcome — no signal, an unreadable shape, a dataLayer that has been
-    reset — resolves to denied when REQUIRE_EXPLICIT_CONSENT is on.
-
-    That direction matters. An earlier version defaulted to granted on
-    anything it could not read, which meant a CMP whose updates never
-    landed in the dataLayer in the expected shape looked exactly like
-    consent. A control that fails open while its documentation says it
-    fails closed is worse than no control.
+    Anything that is not exactly 'none' falls through to the fail-closed
+    branch, which is the safe direction but a baffling one to debug: someone
+    who typed 'None' gets told to set CONSENT_MODE = "none", which is what
+    they believe they did. Say so plainly instead.
   */
-  function consentGranted() {
+  function consentModeIsNone() {
+    if (CONSENT_MODE === 'none') return true;
+    if (CONSENT_MODE !== 'cmp') {
+      warnedBadConsentMode = warnOnce(warnedBadConsentMode,
+        'CONSENT_MODE is ' + JSON.stringify(CONSENT_MODE) + ', which is neither ' +
+        '"cmp" nor "none". Treating it as "cmp", so no user data will be ' +
+        'collected without a consent signal. Check for a typo or stray whitespace.');
+    }
+    return false;
+  }
+
+  // Deliberately not behind DEBUG. Silence in either of these cases looks
+  // identical to "enhanced conversions is working", which is the failure
+  // this whole script exists to stop.
+  function warnOnce(already, message) {
+    if (already || !window.console || !console.warn) return true;
+    try { console.warn('[form-tracking] ' + message); } catch (err) {}
+    return true;
+  }
+
+  /*
+    Reads the current consent position without judging it: 'granted',
+    'denied', or 'no_signal' when nothing readable said either way.
+
+    Every unreadable outcome — a malformed shape, a dataLayer that has been
+    reset, a region-scoped entry we cannot place — reports 'no_signal'
+    rather than guessing. What that means is CONSENT_MODE's decision, made
+    in consentDecision() below, and it is the only place the two are
+    allowed to be conflated.
+  */
+  function consentState() {
     if (typeof window.formTrackingConsentFn === 'function') {
       try {
         // Strict equality on purpose: the natural way to write a CMP
-        // adapter returns undefined on its deny branch.
-        return window.formTrackingConsentFn() === true;
+        // adapter returns undefined on its deny branch. Note that defining
+        // the function is itself a declaration, so there is no 'no_signal'
+        // outcome on this path — an adapter that cannot tell should throw.
+        return window.formTrackingConsentFn() === true ? 'granted' : 'denied';
       } catch (err) {
         log('consent function threw, treating as denied', err);
-        return false;
+        return 'denied';
       }
     }
 
     var dl = window.dataLayer;
     var state = null;
     var sawUpdate = false;
+    var sawRegionScoped = false;
 
     if (dl && typeof dl.length === 'number') {
       for (var i = 0; i < dl.length; i++) {
@@ -294,35 +406,146 @@
         if (command !== 'default' && command !== 'update') continue;
         var settings = entry[2];
         if (!settings || typeof settings !== 'object') continue;
-        // A region-scoped entry may not apply to this visitor, and we
-        // cannot tell from here which region they are in.
-        if (settings.region) continue;
-        // Consent Mode semantics: a default never overrides an update.
-        if (command === 'default' && sawUpdate) continue;
+        // Checked before the region test, so a region-scoped entry about
+        // some other consent type does not make this one unresolvable.
         if (typeof settings.ad_user_data !== 'string') continue;
+        /*
+          Region scoping is a feature of the `default` command only —
+          Google documents it as "specify a region (according to ISO
+          3166-2) in your gtag consent default command", and the gtag
+          reference does not list region among the consent parameters at
+          all. So a region key on an `update` is not a scoping
+          instruction, and treating it as one threw away the visitor's
+          own answer: a CMP that builds one settings object and reuses it
+          across both commands had its update ignored, and a stale
+          earlier denial stood instead.
+
+          Region-scoped defaults are noted, not read — see below.
+        */
+        // Length-checked, not just truthy: some CMPs emit `region: []`
+        // rather than omitting the key, and an empty array is truthy in
+        // JavaScript — which turned a perfectly readable global default
+        // into region_unresolved and collected nothing.
+        if (command === 'default' && settings.region && settings.region.length) {
+          sawRegionScoped = true;
+          continue;
+        }
+        /*
+          Once the visitor has answered, a later `default` is ignored.
+
+          This is our choice, not a documented Consent Mode guarantee —
+          Google's docs are silent on the interaction, and a stray
+          `default` re-firing after a CMP's `update` is a known way to
+          reset consent state in a real container. We privilege the
+          answer because the alternative lets a leftover hardcoded
+          default overrule what the visitor actually clicked.
+
+          The residual risk runs one way: update-granted followed by
+          default-denied keeps us collecting while Google's own state may
+          have reverted. A stray default is a container bug either way,
+          and this is the direction that respects the click.
+        */
+        if (command === 'default' && sawUpdate) continue;
         state = settings.ad_user_data === 'granted';
         if (command === 'update') sawUpdate = true;
       }
     }
 
-    if (state === null) {
-      if (!REQUIRE_EXPLICIT_CONSENT) return true;
-      if (!warnedNoConsentSignal && window.console && console.warn) {
-        warnedNoConsentSignal = true;
-        // Deliberately not behind DEBUG. Silence here looks identical to
-        // "enhanced conversions is working", which is the failure this
-        // whole script exists to stop.
-        try {
-          console.warn('[form-tracking] no ad_user_data consent signal found in ' +
-            'the dataLayer, so user-provided data was not collected. Configure ' +
-            'Consent Mode v2, set window.formTrackingConsentFn, or set ' +
-            'REQUIRE_EXPLICIT_CONSENT = false if you have another lawful basis.');
-        } catch (err) {}
+    /*
+      A visitor who answers the banner gets an update pushed globally, not
+      per region, so their own choice resolves the question no matter what
+      the regional defaults said. Take it and stop.
+    */
+    if (sawUpdate) return state ? 'granted' : 'denied';
+
+    /*
+      No update, and at least one region-scoped default mentioned
+      ad_user_data. This is unresolvable, and it took a live leak to see it.
+
+      The standard Consent Mode v2 configuration is a restrictive default
+      for a list of regions plus a permissive global fallback for everyone
+      else. Which of those applies depends on where the visitor is, and this
+      code runs in a browser that is not told. The previous version skipped
+      region-scoped entries as "probably somewhere else" and read the
+      fallback instead — so a visitor inside a denied region who never
+      touched the banner had their hashed email pushed to the dataLayer,
+      reported as a clean success.
+
+      Guessing has no safe direction here: read the fallback and you
+      over-collect, ignore it and you under-collect. So report neither.
+      CONSENT_MODE decides what silence means, as it does everywhere else,
+      and window.formTrackingConsentFn is the way out for a site that really
+      does use regional defaults — its CMP knows the region and we do not.
+    */
+    if (sawRegionScoped) return 'region_unresolved';
+
+    if (state === null) return 'no_signal';
+    return state ? 'granted' : 'denied';
+  }
+
+  /*
+    Turns that reading into a decision, given what the site declared.
+
+      granted   -> collect, whatever CONSENT_MODE says
+      denied    -> do not, whatever CONSENT_MODE says
+      no_signal -> CONSENT_MODE decides
+
+    A present signal winning in both directions is what makes 'none' safe
+    to set on a site that later acquires a CMP: the declaration only ever
+    governs the silence.
+
+    Returns { collect, status, cmp }. `cmp` is set only where there was no
+    signal to read, and it rides on the payload so the state is visible in
+    GTM rather than only in a console nobody has open. A named CMP next to
+    a missing signal is the difference between "something is wrong" and
+    "go and wire this specific thing up".
+  */
+  function consentDecision() {
+    var state = consentState();
+
+    if (state === 'granted') return { collect: true,  status: 'collected',      cmp: null };
+    if (state === 'denied')  return { collect: false, status: 'consent_denied', cmp: null };
+
+    // No readable signal. Whichever way CONSENT_MODE resolves that, whether
+    // a CMP is sitting on the page is the fact that tells you what to fix,
+    // so look either way — it just means different things in each.
+    var cmp = detectCmp();
+
+    if (consentModeIsNone()) {
+      // Region-scoped consent entries are themselves proof that something is
+      // managing consent here, whether or not it left a fingerprint we know.
+      var evidence = cmp ||
+        (state === 'region_unresolved' ? 'region-scoped Consent Mode entries are' : null);
+      if (evidence) {
+        warnedCmpContradiction = warnOnce(warnedCmpContradiction,
+          'CONSENT_MODE is "none" but ' + evidence + ' on this page. User data ' +
+          'is being collected without checking it. Either wire consent up to ' +
+          'Consent Mode v2, point window.formTrackingConsentFn at it, or set ' +
+          'CONSENT_MODE = "cmp".');
       }
-      return false;
+      return { collect: true, status: 'collected_undeclared', cmp: cmp };
     }
 
-    return state;
+    if (state === 'region_unresolved') {
+      warnedRegionUnresolved = warnOnce(warnedRegionUnresolved,
+        'consent here is configured per region, and a browser is not told ' +
+        'which region the visitor is in — so which default applies to them ' +
+        'cannot be worked out and no user data was collected. Visitors who ' +
+        'answer the banner are unaffected, because their choice is pushed ' +
+        'globally. To collect from the rest, point ' +
+        'window.formTrackingConsentFn at your CMP\'s own resolved state.');
+      return { collect: false, status: 'region_unresolved', cmp: cmp };
+    }
+
+    warnedNoConsentSignal = warnOnce(warnedNoConsentSignal, cmp
+      ? cmp + ' is on this page but is not emitting an ad_user_data signal, ' +
+        'so user-provided data was not collected. Wire ' + cmp + ' to Consent ' +
+        'Mode v2, or point window.formTrackingConsentFn at it.'
+      : 'no ad_user_data consent signal found in the dataLayer, so ' +
+        'user-provided data was not collected. Configure Consent Mode v2, set ' +
+        'window.formTrackingConsentFn, or set CONSENT_MODE = "none" if this ' +
+        'site has no CMP and you have another lawful basis.');
+    return { collect: false, status: 'no_consent_signal', cmp: cmp };
   }
 
   /* ── Normalisation ──────────────────────────────────────────────────
@@ -424,9 +647,12 @@
 
   function normPostal(v) {
     // Collapse internal whitespace rather than stripping it. Google
-    // normalises postal codes itself and its own worked example keeps the
-    // space (SO99 9XX), so there is nothing to gain from a lossier
-    // transform on the one address key UK matching leans on.
+    // documents no normalisation for postal codes — they are sent in the
+    // clear and matched on the raw string — so there is nothing to gain
+    // from a lossier transform on the one address key UK matching leans on.
+    // (An earlier version of this comment cited a Google worked example
+    // keeping the space. That example could not be found; the reasoning
+    // stands without it.)
     var s = String(v).trim().toLowerCase().replace(/\s+/g, ' ');
     if (!s || s.length > 12 || s.indexOf('@') !== -1) return '';
     return s;
@@ -517,13 +743,45 @@
         if (raw[key]) address[key] = raw[key];
       });
 
-      for (var k in address) {
-        if (address.hasOwnProperty(k)) { userData.address = address; break; }
+      /*
+        Country is the field nobody asks for. A UK enquiry form collects a
+        name and a postcode and stops, so the set is one value short of
+        usable and the value it is short of is the same for every visitor
+        the site has.
+
+        Two things to be honest about. This is an INFERRED value, not one
+        the visitor gave — Google's customer-data policy describes
+        first-party data as information shared directly by the customer, and
+        a site-wide default is not that. And it only fires when no country
+        field was seen at all: a visitor who answered, in words the alias
+        table could not read, keeps their answer and the address is withheld
+        rather than relabelled.
+
+        Only the country is ever assumed. Guarding this on the rest of the
+        set being present would read as extra safety and be dead code — the
+        completeness test below already discards an address short of
+        anything, so stamping a country onto one that is going to be
+        dropped changes nothing.
+      */
+      if (ASSUME_DEFAULT_COUNTRY && !address.country && !raw.country_supplied) {
+        var assumed = normalise('country', DEFAULT_COUNTRY);
+        if (assumed) address.country = assumed;
       }
 
-      // Google needs at least an email, a phone, or a usable address.
+      /*
+        Google's address block is all or nothing: first name, last name,
+        postcode and country together, or it discards the whole thing and
+        reports "your enhanced conversions addresses are missing required
+        fields" in the diagnostics panel.
+
+        So a partial address is not a partial benefit — it is zero benefit
+        and a warning. Worse, it is hashed personal data pushed into a
+        page-global array for nothing, which is precisely what the rest of
+        this file works to avoid. Send the set or send none of it.
+      */
       var hasAddress = !!(address.sha256_first_name && address.sha256_last_name &&
                           address.postal_code && address.country);
+      if (hasAddress) userData.address = address;
       if (!userData.sha256_email_address && !userData.sha256_phone_number && !hasAddress) {
         log('no matchable identifier, dropping user_data');
         return null;
@@ -733,6 +991,15 @@
       }
 
       if (raw[key]) continue;
+      /*
+        Noted before validation, because "no country field" and "a country
+        field we could not read" have to be told apart. They both leave
+        raw.country unset, and ASSUME_DEFAULT_COUNTRY must only fill the
+        first — a visitor who answered Greece, which is not in the alias
+        table, would otherwise have their answer replaced with the site
+        default and their address sent somewhere they have never been.
+      */
+      if (key === 'country') raw.country_supplied = true;
       var norm = normalise(key, value);
       if (!norm) continue;
       raw[key] = norm;
@@ -792,23 +1059,66 @@
 
     var pending = {
       details: formDetails(id, form),
-      promise: null, userData: null, hashed: false, committed: false
+      promise: null, userData: null, hashed: false, committed: false,
+      status: null, cmp: null
     };
 
-    // Consent is checked before a single field is read, not after.
-    var raw = (CAN_HASH && consentGranted()) ? readElementorFields(form) : null;
-    if (raw) {
-      // Started here, not at success, so the hash is ready before the
-      // redirect action has a chance to unload the page.
-      pending.promise = buildUserData(raw).then(function (ud) {
-        pending.userData = ud;
-        pending.hashed = true;
-        return ud;
-      })['catch'](function (err) {
-        log('user data failed, falling back to the plain event', err);
-        pending.hashed = true;
-        return null;
-      });
+    /*
+      The status is decided here, at submit, because that is where consent
+      is read and where the fields still exist — but it is reported at
+      commit, so it travels on `pending` with everything else.
+
+      Before this existed, five outcomes committed a byte-identical event:
+      consent denied, no CMP signal, no matchable field, no SubtleCrypto,
+      and hashing failing. A broken install was indistinguishable from a
+      working one anywhere downstream.
+    */
+    // Read before consent is: with no SubtleCrypto nothing can be hashed,
+    // so there is no personal data for consent to have an opinion about.
+    if (!CAN_HASH) {
+      pending.status = 'no_crypto';
+    } else {
+      // Consent is checked before a single field is read, not after.
+      var decision = consentDecision();
+      pending.cmp = decision.cmp;
+
+      if (!decision.collect) {
+        pending.status = decision.status;
+      } else {
+        var raw = readElementorFields(form);
+        if (!raw) {
+          pending.status = 'no_fields';
+        } else {
+          pending.status = decision.status;
+          /*
+            buildUserData can throw synchronously as well as reject, and
+            `.catch` does not exist until a promise has been returned — so
+            a synchronous throw goes straight past it and out of capture().
+            On the sibling html-forms plugin that meant no event at all: a
+            browser extension replacing crypto.subtle with something whose
+            digest() throws made the submission disappear.
+          */
+          try {
+            // Started here, not at success, so the hash is ready before the
+            // redirect action has a chance to unload the page.
+            pending.promise = buildUserData(raw).then(function (ud) {
+              pending.userData = ud;
+              if (!ud) pending.status = 'no_fields';
+              pending.hashed = true;
+              return ud;
+            })['catch'](function (err) {
+              log('user data failed, falling back to the plain event', err);
+              pending.status = 'error';
+              pending.hashed = true;
+              return null;
+            });
+          } catch (err) {
+            log('user data threw synchronously, falling back to the plain event', err);
+            pending.status = 'error';
+            pending.promise = null;
+          }
+        }
+      }
     }
 
     form.__eltPending = pending;
@@ -841,20 +1151,51 @@
     if (pending.committed) return;                      // a second listener
     pending.committed = true;
 
-    var payload = { event: EVENT_NAME, form_details: pending.details };
+    /*
+      Built when the push happens, not before: the hashing callbacks can
+      still move `pending.status` (to no_fields or error), so reading it
+      early would report the outcome the submit expected rather than the
+      one that occurred.
+    */
+    /*
+      Consent is re-read here, not only at capture. Elementor hashes at
+      submit and pushes at submit_success, and a visitor can reject the
+      banner in between — which is exactly the window this two-phase shape
+      opens. The point of gating the payload is that it reflects the answer
+      at the moment of disclosure, and that moment is this one, not the
+      submit. A later denial overrides whatever the capture decided.
 
-    if (!pending.promise) { pushAndWait(payload); return; }
-    if (pending.hashed) {
-      if (pending.userData) payload.user_data = pending.userData;
-      pushAndWait(payload);
-      return;
+      The README claimed this happened long before it did. It did not, and
+      rewriting the section is what turned the claim up.
+    */
+    if (pending.userData || pending.promise) {
+      var again = consentDecision();
+      if (!again.collect) {
+        pending.userData = null;
+        pending.promise = null;
+        pending.status = again.status;
+        pending.cmp = again.cmp;
+      }
     }
+
+    var send = function (userData) {
+      var payload = {
+        event: EVENT_NAME,
+        form_details: pending.details,
+        user_data_status: pending.status
+      };
+      if (pending.cmp) payload.cmp_detected = pending.cmp;
+      if (userData) payload.user_data = userData;
+      pushAndWait(payload);
+    };
+
+    if (!pending.promise) { send(null); return; }
+    if (pending.hashed) { send(pending.userData); return; }
     // The round trip finished faster than SubtleCrypto, which is unusual
     // but not impossible on a cached response.
     pending.promise.then(function (ud) {
-      if (ud) payload.user_data = ud;
-      pushAndWait(payload);
-    })['catch'](function () { pushAndWait(payload); });
+      send(ud);
+    })['catch'](function () { send(null); });
   }
 
   /*

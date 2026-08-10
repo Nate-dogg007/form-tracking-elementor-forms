@@ -1,14 +1,14 @@
 # Elementor Pro forms tracking for Google Ads enhanced conversions
 
 Author: Nathan O'Connor
-Version: 1.0
+Version: 1.1
 
 Reads Elementor Pro form submissions, normalises and SHA-256 hashes the user-provided data fields
 Google Ads wants, and pushes one `elementor_form_submit` event to the dataLayer. Personal data is
 only ever read once your CMP has granted `ad_user_data`, re-checked on every submission.
 
-**Install is one GTM Custom HTML tag.** Paste the file in, set one country code, trigger on All
-Pages.
+**Install is one GTM Custom HTML tag.** Paste the file in, set three constants — a country code,
+`CONSENT_MODE`, and whether to assume that country on addresses — and trigger on All Pages.
 
 ## What is verified, and what is not
 
@@ -156,20 +156,95 @@ is not about that. It keeps hashed personal data out of `window.dataLayer`, whic
 the container and every third-party script on the page can read regardless of what Google Ads
 decides.
 
-Consent is checked **at submit, before a single field is read**, and again before the push. It
-**fails closed**: no signal, an unreadable shape, a reset dataLayer, a `default` after an `update`,
-or a region-scoped entry for somewhere else all resolve to denied.
+Consent is checked **at submit, before a single field is read**. An unreadable shape, a reset
+dataLayer or a `default` after an `update` all resolve to denied.
 
-If you are not running Consent Mode v2, no user data is collected, and the script logs one console
-warning saying so. Set `REQUIRE_EXPLICIT_CONSENT = false` only if you have another lawful basis.
-`window.formTrackingConsentFn` overrides the check and must return exactly `true` to grant.
+**No signal at all is the case you have to decide**, because "this site has no CMP" and "this site
+has a CMP that never emits Consent Mode" are the same silence and nothing in JavaScript separates
+them. Declare it with `CONSENT_MODE`:
+
+| `CONSENT_MODE` | Means | What silence does |
+|---|---|---|
+| `'cmp'` *(default)* | This site has a CMP | Collect nothing — the CMP is misconfigured |
+| `'none'` | No CMP here, and you have a lawful basis | Collect |
+
+A signal always wins where there is one, so `'none'` still honours a denial. The script also
+fingerprints the common CMPs and reports what it finds as `cmp_detected` whenever there was no
+signal to read — never to decide anything, only to name which thing is silent, or to catch a
+`'none'` declared on a site that visibly has a banner.
+
+**Region-scoped defaults cannot be resolved here.** The standard Consent Mode setup is a
+restrictive default for a list of regions plus a permissive global fallback, and which one applies
+depends on where the visitor is — which a browser is not told. Those report `region_unresolved`
+rather than guessing. Anyone who answers the banner is unaffected, because their choice is pushed
+as a global `update` which resolves it; expect it to affect the
+[21.7%–27.4%](https://www.didomi.io/blog/benchmark-average-consent-rate-europe) who never answer.
+
+`window.formTrackingConsentFn` overrides all of it and must return exactly `true` to grant.
+
+## Knowing whether it worked: `user_data_status`
+
+Every push carries one. Without it, five different outcomes pushed an identical event and a broken
+install was indistinguishable from a working one.
+
+| Value | Meaning |
+|---|---|
+| `collected` | `user_data` attached, after a positive signal |
+| `collected_undeclared` | Attached because `CONSENT_MODE = 'none'` |
+| `consent_denied` | A signal said no |
+| `no_consent_signal` | `CONSENT_MODE = 'cmp'` and nothing emitted a signal |
+| `region_unresolved` | Consent is set per region, which a browser cannot resolve |
+| `no_fields` | Nothing on the form to match on |
+| `no_crypto` | No SubtleCrypto, so not a secure context |
+| `error` | Hashing or assembly threw |
+
+The status is decided at submit, where consent is read and the fields still exist, and reported at
+`submit_success` — so it travels with the captured data rather than being recomputed late.
+
+The conversion is never what gets gated: the event fires on every successful submission in every
+row above. Only the payload is withheld.
+
+## The address block is all four fields or none
+
+`address` is sent only when first name, last name, postal code **and** country are all present.
+That is Google's rule: send three of the four and it discards the lot and reports *"your enhanced
+conversions addresses are missing required fields"*. A partial address is zero credit and a
+warning, so it is withheld entirely.
+
+Email and phone are separate identifiers and go regardless — no lead is lost by this.
+
+Elementor has no composite address field, so all four are separate Text fields and country is the
+one nobody adds. If enquiries come from one country, set `ASSUME_DEFAULT_COUNTRY = true` and it is
+filled from `DEFAULT_COUNTRY`.
 
 ## Install
 
 1. **Tags → New → Tag Configuration → Custom HTML.**
 2. Open the `elementor-forms` file in this repo, select **all of it**, and paste it into the HTML
    box. Include the `<script>` and `</script>` lines.
-3. Set `DEFAULT_COUNTRY` to the country most of this site's visitors are in.
+3. Set the three constants in the config block near the top. Each is a question about the site,
+   not a preference:
+
+   ```js
+   var DEFAULT_COUNTRY        = 'GB';    // where are most of this site's visitors?
+   var CONSENT_MODE           = 'cmp';   // does this site have a cookie banner?
+   var ASSUME_DEFAULT_COUNTRY = false;   // do enquiries come from one country?
+   ```
+
+   `DEFAULT_COUNTRY` turns national phone formats into E.164 and is the one that quietly ruins
+   everything if it is wrong — see below.
+
+   `CONSENT_MODE` is `'cmp'` if the site has a consent banner and `'none'` if it does not. It
+   decides whether anything is collected at all when no consent signal is present, so read the
+   Consent section before setting `'none'` — it is a statement about the deployment and the script
+   trusts you.
+
+   `ASSUME_DEFAULT_COUNTRY` is the one most sites need and nobody expects. Google discards an
+   address unless it has first name, last name, postcode **and** country together — and almost no
+   lead form asks for country. Set it to `true` and country is filled from `DEFAULT_COUNTRY`;
+   leave it `false` and most forms will send no address at all. Set it only where enquiries
+   genuinely come from one country — it is an inferred value, not one the visitor gave, and a
+   visitor who *does* answer keeps their answer even if we cannot read it.
 4. **Triggering → All Pages.**
 5. Save.
 
