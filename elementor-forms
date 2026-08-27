@@ -1,4 +1,16 @@
 <script>
+/* ─────────────────────────────────────────────────────────────────────
+   GENERATED FILE — DO NOT EDIT
+
+   Built from Nate-dogg007/form-tracking-core (private), v1.5.1.
+   Edits here are overwritten by the next release and reach no site.
+
+   To change behaviour: core/ for anything shared with the other four
+   plugins, adapters/elementor-forms/ for anything specific to this one.
+
+   Pasting this whole file into a GTM Custom HTML tag is still exactly
+   how it is installed. That has not changed and is not going to.
+   ───────────────────────────────────────────────────────────────────── */
 /*
   ░▒▓█ Elementor Pro Forms → Google Ads Enhanced Conversions █▓▒░
   Author:  Nathan O'Connor
@@ -195,7 +207,6 @@
   };
 
   // A single field holding a whole name. Split into first + last.
-  // Elementor's own starter form ships exactly this, as form_fields[name].
   var FULL_NAME = ['name', 'full_name', 'fullname', 'complete_name'];
 
   /*
@@ -571,10 +582,10 @@
   /*
     Try the allowlist at every prefix-strip level, most specific first.
     Matching only the fully stripped key meant `form_fields[email]`
-    stalled on `fields_email` and `address[zip]` never stripped at all, so
-    those forms produced nothing. Going level by level also keeps
-    `address_1` resolving to street, because it matches before `address`
-    is treated as a prefix.
+    (Elementor) stalled on `fields_email` and `address[zip]` (Shopify)
+    never stripped at all, so those forms produced nothing. Going level by
+    level also keeps `address_1` resolving to street, because it matches
+    before `address` is treated as a prefix.
   */
   function matchKey(key) {
     // Checked against the raw key, before any stripping: `form_name`
@@ -796,9 +807,11 @@
     the time the page unloads is a lost conversion, and that applies just
     as much to the consent-denied event as to the enriched one.
 
-    Elementor's "Redirect" action navigates in the same success handler
-    that triggers submit_success, so this is not a theoretical concern
-    here the way it is on a form that stays put.
+  /*
+    Pushes, and resolves once GTM reports its tags have fired. Every push
+    goes through here: a conversion pixel that has not left the browser by
+    the time the page unloads is a lost conversion, and that applies just
+    as much to the consent-denied event as to the enriched one.
   */
   function pushAndWait(payload) {
     return new Promise(function (resolve) {
@@ -1024,22 +1037,60 @@
     var id = widget && widget.getAttribute && widget.getAttribute('data-id');
     return id ? String(id) : '';
   }
+  /*
+    The name ladder, from design/escape-hatches.md:
+
+      data-form-name on the element or ANY ANCESTOR
+        -> the platform's own title
+          -> '<platform>_form_' + id
+            -> 'unnamed_form'
+
+    closest(), not getAttribute(), and that is the whole point of the function.
+    Measured on a live Ninja install: the <form> renders with no id and no class
+    inside a generated #nf-form-<id>-cont, so neither element is anywhere a
+    WordPress editor can put an attribute. A wrapper the site owner writes
+    themselves is the only override that exists there.
+
+    closest() starts at the element itself, so this is a strict superset of
+    reading the attribute off the form. No install that already sets it changes.
+
+    `attrs` is per-adapter rather than a constant. html-forms also honours the
+    deprecated data-title, and that must NOT be read on the other four: it is a
+    generic attribute themes and sliders use for tooltips, so reading it as a
+    form name would invent names on sites that never set one.
+
+    Nothing below the ladder is manufactured. No id from DOM position, from the
+    field set, or from a hash of the markup — those change when the page changes,
+    and a form_name that silently re-buckets in GA4 is worse than one that is
+    visibly absent. `unnamed_form` showing up in a report is the signal to go and
+    add the attribute.
+  */
+  function resolveFormName(el, attrs, ownTitle, fallback) {
+    try {
+      for (var i = 0; i < attrs.length; i++) {
+        var host = el && el.closest && el.closest('[' + attrs[i] + ']');
+        var v = host && host.getAttribute && host.getAttribute(attrs[i]);
+        if (v && v.trim()) return v.trim();
+      }
+    } catch (err) { log('could not resolve a form name', err); }
+    if (ownTitle && String(ownTitle).trim()) return String(ownTitle).trim();
+    return fallback;
+  }
 
   function formDetails(id, form) {
-    var name = '';
+    var own = '';
     try {
       // getAttribute, not form.name: an input called `name` shadows the
       // property on a form element, and `form_fields[name]` is the field
       // ID Elementor's own starter form ships with.
       if (form && form.getAttribute) {
-        name = form.getAttribute('data-form-name') ||
-               form.getAttribute('name') ||
-               form.getAttribute('aria-label') || '';
+        own = form.getAttribute('name') || form.getAttribute('aria-label') || '';
       }
     } catch (err) { log('could not read a form name', err); }
     return {
       form_id: String(id || ''),
-      form_name: String(name).trim() || ('elementor_form_' + (id || 'unknown'))
+      form_name: resolveFormName(form, ['data-form-name'], own,
+                                 'elementor_form_' + (id || 'unknown'))
     };
   }
 
